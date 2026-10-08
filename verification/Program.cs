@@ -59,6 +59,7 @@ internal static class OfflineChecks
             "Secrets exclus de la serialisation du designer");
         var steam = new SteamClient();
         Equal(false, steam.IsConnected, "Initialisation SteamKit sans connexion");
+        checks += TransferChecks.Run();
         Console.WriteLine($"{checks} verifications hors ligne reussies.");
     }
 

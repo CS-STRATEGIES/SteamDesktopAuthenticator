@@ -362,3 +362,5 @@ artifacts/
 maFiles/
 *.maFile
 *.maFile.*
+*.sda-transfer
+*.sda-transfer.*

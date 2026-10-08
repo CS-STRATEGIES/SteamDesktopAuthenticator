@@ -1,10 +1,11 @@
 param(
-    [string]$DotNet = 'dotnet'
+    [string]$DotNet = 'dotnet',
+    [string]$OutputDirectory = 'artifacts\SDA-win-x64'
 )
 
 $ErrorActionPreference = 'Stop'
 $sdaRoot = $PSScriptRoot
-$sdaOutput = Join-Path $sdaRoot 'artifacts\SDA-win-x64'
+$sdaOutput = [IO.Path]::GetFullPath($OutputDirectory, $sdaRoot)
 if (Test-Path -LiteralPath $sdaOutput) {
     throw 'Le dossier de sortie existe deja. Conservez ses eventuels maFiles et choisissez une copie propre du depot pour reconstruire.'
 }

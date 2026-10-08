@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Windows.Forms;
 using SteamAuth;
 using SteamKit2;
@@ -13,16 +14,18 @@ namespace Steam_Desktop_Authenticator
         public SteamGuardAccount account;
         public LoginType LoginReason;
         public SessionData Session;
+        private CancellationTokenSource loginCancellation;
 
         public LoginForm(LoginType loginReason = LoginType.Initial, SteamGuardAccount account = null)
         {
             InitializeComponent();
             this.LoginReason = loginReason;
             this.account = account;
+            FormClosed += (_, _) => loginCancellation?.Cancel();
 
             try
             {
-                if (this.LoginReason != LoginType.Initial)
+                if (this.LoginReason == LoginType.Refresh || this.LoginReason == LoginType.Import)
                 {
                     txtUsername.Text = account.AccountName;
                     txtUsername.Enabled = false;
@@ -35,6 +38,10 @@ namespace Steam_Desktop_Authenticator
                 else if (this.LoginReason == LoginType.Import)
                 {
                     labelLoginExplanation.Text = "Please login to your Steam account import it.";
+                }
+                else if (this.LoginReason == LoginType.Transfer)
+                {
+                    labelLoginExplanation.Text = "Sign in with your current phone's Steam Guard code. Keep its authenticator enabled.";
                 }
             }
             catch (Exception)
@@ -73,66 +80,32 @@ namespace Steam_Desktop_Authenticator
             btnSteamLogin.Enabled = false;
             btnSteamLogin.Text = "Logging in...";
 
-            string username = txtUsername.Text;
-            string password = txtPassword.Text;
-
-            // Start a new SteamClient instance
-            SteamClient steamClient = new SteamClient();
-
-            // Connect to Steam
-            steamClient.Connect();
-
-            // Really basic way to wait until Steam is connected
-            while (!steamClient.IsConnected)
-                await Task.Delay(500);
-
-            // Create a new auth session
-            CredentialsAuthSession authSession;
+            SessionData sessionData;
             try
             {
-                authSession = await steamClient.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails
+                sessionData = await AuthenticateAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                if (!IsDisposed) Close();
+                return;
+            }
+            catch (Exception)
+            {
+                if (!IsDisposed)
                 {
-                    Username = username,
-                    Password = password,
-                    IsPersistentSession = false,
-                    PlatformType = EAuthTokenPlatformType.k_EAuthTokenPlatformType_MobileApp,
-                    ClientOSType = EOSType.Android9,
-                    Authenticator = new UserFormAuthenticator(this.account),
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Steam Login Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.Close();
+                    MessageBox.Show("Steam login failed or timed out. Check your credentials, current Steam Guard code and connection.", "Steam Login Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Close();
+                }
                 return;
             }
-
-            // Starting polling Steam for authentication response
-            AuthPollResult pollResponse;
-            try
-            {
-                pollResponse = await authSession.PollingWaitForResultAsync();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Steam Login Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.Close();
-                return;
-            }
-
-            // Build a SessionData object
-            SessionData sessionData = new SessionData()
-            {
-                SteamID = authSession.SteamID.ConvertToUInt64(),
-                AccessToken = pollResponse.AccessToken,
-                RefreshToken = pollResponse.RefreshToken,
-            };
+            if (IsDisposed) return;
 
             //Login succeeded
             this.Session = sessionData;
 
             // If we're only logging in for an account import, stop here
-            if (LoginReason == LoginType.Import)
+            if (LoginReason == LoginType.Import || LoginReason == LoginType.Transfer)
             {
                 this.Close();
                 return;
@@ -327,6 +300,47 @@ namespace Steam_Desktop_Authenticator
             }
         }
 
+        private async Task<SessionData> AuthenticateAsync()
+        {
+            var steamClient = new SteamClient();
+            loginCancellation = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var cancellation = loginCancellation.Token;
+            try
+            {
+                steamClient.Connect();
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (!steamClient.IsConnected)
+                {
+                    if (DateTime.UtcNow > deadline) throw new TimeoutException();
+                    await Task.Delay(250, cancellation);
+                }
+                var authSession = await steamClient.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails
+                {
+                    Username = txtUsername.Text,
+                    Password = txtPassword.Text,
+                    IsPersistentSession = false,
+                    PlatformType = EAuthTokenPlatformType.k_EAuthTokenPlatformType_MobileApp,
+                    ClientOSType = EOSType.Android9,
+                    Authenticator = new UserFormAuthenticator(account, LoginReason == LoginType.Transfer)
+                }).WaitAsync(cancellation);
+                var result = await authSession.PollingWaitForResultAsync(cancellation);
+                cancellation.ThrowIfCancellationRequested();
+                return new SessionData
+                {
+                    SteamID = authSession.SteamID.ConvertToUInt64(),
+                    AccessToken = result.AccessToken,
+                    RefreshToken = result.RefreshToken
+                };
+            }
+            finally
+            {
+                steamClient.Disconnect();
+                loginCancellation.Dispose();
+                loginCancellation = null;
+                if (!IsDisposed) txtPassword.Clear();
+            }
+        }
+
         private void HandleManifest(Manifest man, bool IsRefreshing = false)
         {
             string passKey = null;
@@ -382,7 +396,8 @@ namespace Steam_Desktop_Authenticator
         {
             Initial,
             Refresh,
-            Import
+            Import,
+            Transfer
         }
     }
 }

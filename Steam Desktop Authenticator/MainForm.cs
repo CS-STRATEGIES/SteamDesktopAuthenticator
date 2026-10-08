@@ -31,6 +31,17 @@ namespace Steam_Desktop_Authenticator
         public MainForm()
         {
             InitializeComponent();
+            var transferItem = new ToolStripMenuItem("Transfer Authenticator");
+            transferItem.Click += (_, _) =>
+            {
+                using var transfer = new TransferAuthenticatorForm();
+                transfer.ShowDialog(this);
+                if (transfer.EncryptionPassphrase != null) passKey = transfer.EncryptionPassphrase;
+                btnManageEncryption.Text = manifest.Encrypted ? "Manage Encryption" : "Setup Encryption";
+                btnManageEncryption.Enabled = manifest.Entries.Count > 0;
+                loadAccountsList();
+            };
+            fileToolStripMenuItem.DropDownItems.Insert(0, transferItem);
         }
 
         public void SetEncryptionKey(string key)

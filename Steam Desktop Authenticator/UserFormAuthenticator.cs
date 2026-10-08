@@ -9,10 +9,12 @@ namespace Steam_Desktop_Authenticator
     {
         private SteamGuardAccount account;
         private int deviceCodesGenerated = 0;
+        private readonly bool allowPhoneCode;
 
-        public UserFormAuthenticator(SteamGuardAccount account)
+        public UserFormAuthenticator(SteamGuardAccount account, bool allowPhoneCode = false)
         {
             this.account = account;
+            this.allowPhoneCode = allowPhoneCode;
         }
 
         public Task<bool> AcceptDeviceConfirmationAsync()
@@ -36,8 +38,17 @@ namespace Steam_Desktop_Authenticator
 
             if (account == null)
             {
-                MessageBox.Show("This account already has an authenticator linked. You must remove that authenticator to add SDA as your authenticator.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return null;
+                if (!allowPhoneCode)
+                {
+                    MessageBox.Show("This account already has an authenticator. Keep it enabled and use File > Transfer Authenticator instead.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    throw new System.OperationCanceledException();
+                }
+                using var input = new InputForm(previousCodeWasIncorrect ?
+                    "That code was rejected. Enter a fresh Steam Guard code from your current phone." :
+                    "Enter the current Steam Guard code shown by the Steam app on your phone.", true);
+                input.ShowDialog();
+                if (input.Canceled) throw new System.OperationCanceledException();
+                deviceCode = input.txtBox.Text.Trim().ToUpperInvariant();
             }
             else
             {
@@ -58,6 +69,7 @@ namespace Steam_Desktop_Authenticator
 
             InputForm emailForm = new InputForm(message);
             emailForm.ShowDialog();
+            if (emailForm.Canceled) throw new System.OperationCanceledException();
             return Task.FromResult(emailForm.txtBox.Text);
         }
     }

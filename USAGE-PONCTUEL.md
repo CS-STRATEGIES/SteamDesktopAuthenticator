@@ -6,11 +6,11 @@ de Node.js ou de Visual Studio n'est necessaire pour l'utiliser.
 
 ## Lancement
 
-Le dossier prepare pour le transfert est `artifacts/SDA-transfer-fixed-win-x64`.
+Le dossier prepare pour le transfert est `artifacts/SDA-recovery-fixed-win-x64`.
 Depuis la racine du depot, lancer directement :
 
 ```powershell
-& '.\artifacts\SDA-transfer-fixed-win-x64\Steam Desktop Authenticator.exe'
+& '.\artifacts\SDA-recovery-fixed-win-x64\Steam Desktop Authenticator.exe'
 ```
 
 Conserver les DLL et les autres fichiers a cote de l'executable. L'application
@@ -75,6 +75,24 @@ le chiffrement historique de SDA pour compatibilite.
   les sauvegardes restent intacts. Recuperer chaque autre compte depuis sa propre
   sauvegarde, ou fermer SDA et restaurer une sauvegarde complete de `maFiles`.
   Annuler ou saisir un mauvais mot de passe ne reinitialise pas l'index.
+- Si l'index est valide mais qu'un compte ne peut plus etre lu, la recuperation
+  reste accessible au demarrage : annuler la saisie du mot de passe puis choisir
+  **Yes** pour ouvrir **Recover saved transfer**. Apres un echec de deverrouillage,
+  **Yes** retente le mot de passe, **No** ouvre la recuperation et **Cancel** ferme
+  sans modifier les comptes.
+  Ouvrir la sauvegarde du **dernier transfert reussi**, saisir son mot de passe,
+  puis celui utilise actuellement par SDA. Les deux mots de passe peuvent differer.
+  Tous les autres comptes doivent etre lisibles avec le mot de passe SDA fourni.
+  Pour un compte unique, il est aussi possible de choisir un nouveau mot de passe.
+  SDA demande une confirmation explicite avant de restaurer un compte indexe
+  illisible : un mauvais mot de passe et une corruption ne sont pas toujours
+  distinguables avec le chiffrement historique.
+  Le compte restaure utilise un nouveau fichier chiffre ; l'ancien fichier reste
+  intact, et l'index complet est conserve dans `manifest.json.before-recovery-*.bak`
+  avec ses anciens parametres de chiffrement. Les autres comptes, leur ordre et
+  les reglages sont preserves. Un compte encore lisible ne peut pas etre remplace.
+  Une erreur d'acces disque, un autre compte illisible ou l'annulation de la
+  confirmation bloque la restauration sans modifier l'index actif.
 - Apres une coupure reseau, Steam peut avoir termine l'operation sans que SDA ait
   recu les nouveaux secrets. Une sauvegarde sans reponse ne peut pas les recreer.
   Verifier le compte avec Steam ou son assistance avant toute nouvelle tentative.
@@ -136,6 +154,9 @@ nouveau les secrets : ne pas supposer que ceux d'EzSteam resteront valides.
 - Non-regression : reconnexion entre dechiffrement et rechiffrement, recuperation
   avec index absent ou invalide, preservation des autres comptes, annulation,
   mauvais mot de passe et echec d'ecriture suivi d'une nouvelle recuperation locale.
+- Recuperation d'un maFile illisible avec index valide, controle de tous les autres
+  comptes, refus d'une ancienne sauvegarde sur un compte lisible et preservation
+  exacte de l'ancien fichier et de l'index avant remplacement.
 
 La verification ne constitue pas un audit complet du code. Le format de chiffrement
 historique de SDA est conserve et l'authentification reelle n'est pas testee par les
@@ -149,7 +170,7 @@ Avec le SDK .NET 10.0.401 et Git :
 ```powershell
 git clone --recurse-submodules https://github.com/CS-STRATEGIES/SteamDesktopAuthenticator.git
 cd SteamDesktopAuthenticator
-.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-transfer-fixed-win-x64'
+.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-recovery-fixed-win-x64'
 ```
 
 Le script refuse un dossier de sortie existant afin de ne pas ecraser ou inclure

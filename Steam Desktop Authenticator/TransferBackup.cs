@@ -110,6 +110,58 @@ namespace Steam_Desktop_Authenticator
                 throw new InvalidOperationException("This account already exists in SDA. No file was overwritten.");
             if (!manifest.Encrypted && manifest.Entries.Count != 0)
                 throw new InvalidOperationException("Enable encryption for existing accounts before importing this transfer.");
+            SaveAccountCore(directory, manifest, account, passphrase);
+        }
+
+        internal static bool ValidateRecovery(string directory, Manifest manifest, SteamGuardAccount account, string passphrase)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(passphrase);
+            var matching = manifest.Entries.Where(e => e.SteamID == account.Session.SteamID).ToArray();
+            if (matching.Length > 1)
+                throw new InvalidOperationException("The account index contains duplicate entries. Restore your complete maFiles backup.");
+            foreach (var entry in manifest.Entries.Where(e => e.SteamID != account.Session.SteamID))
+            {
+                if (!manifest.Encrypted || !CanReadAccount(directory, manifest, entry, passphrase))
+                    throw new InvalidOperationException("The other SDA accounts cannot all be unlocked with this password. Use their current SDA encryption password or restore your complete maFiles backup. No account was changed.");
+            }
+            if (matching.Length == 0) return false;
+            if (CanReadAccount(directory, manifest, matching[0], passphrase))
+                throw new InvalidOperationException("This account is already readable in SDA. Recovery will not replace it with a possibly older authenticator.");
+            // Le format CBC ne distingue pas toujours corruption et mauvais mot de passe.
+            // Le formulaire exige une confirmation avant ce remplacement local reversible.
+            return true;
+        }
+
+        private static bool CanReadAccount(string directory, Manifest manifest, Manifest.ManifestEntry entry, string passphrase)
+        {
+            // Les erreurs d'acces et d'E/S restent des erreurs : elles ne prouvent pas
+            // une corruption et ne doivent jamais autoriser le remplacement du compte.
+            var text = File.ReadAllText(Path.Combine(directory, entry.Filename));
+            try
+            {
+                if (manifest.Encrypted)
+                    text = FileEncryptor.DecryptData(passphrase, entry.Salt, entry.IV, text);
+                if (string.IsNullOrWhiteSpace(text)) return false;
+                var account = JsonConvert.DeserializeObject<SteamGuardAccount>(text);
+                return Manifest.IsUsableAccount(account, entry.SteamID);
+            }
+            catch (Exception ex) when (ex is JsonException || ex is FormatException ||
+                ex is CryptographicException || ex is ArgumentException)
+            {
+                return false;
+            }
+        }
+
+        internal static void RecoverAccount(string directory, Manifest manifest, SteamGuardAccount account, string passphrase)
+        {
+            var replacing = ValidateRecovery(directory, manifest, account, passphrase);
+            var index = replacing ? manifest.Entries.FindIndex(e => e.SteamID == account.Session.SteamID) : -1;
+            SaveAccountCore(directory, manifest, account, passphrase, index);
+        }
+
+        private static void SaveAccountCore(string directory, Manifest manifest, SteamGuardAccount account, string passphrase, int replaceIndex = -1)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(passphrase);
             var salt = FileEncryptor.GetRandomSalt();
             var iv = FileEncryptor.GetInitializationVector();
             var encrypted = FileEncryptor.EncryptData(passphrase, salt, iv, JsonConvert.SerializeObject(account));
@@ -120,10 +172,19 @@ namespace Steam_Desktop_Authenticator
             var filename = account.Session.SteamID + "-" + Guid.NewGuid().ToString("N") + ".maFile";
             var next = JsonConvert.DeserializeObject<Manifest>(JsonConvert.SerializeObject(manifest));
             next.Encrypted = true;
-            next.Entries.Add(new Manifest.ManifestEntry
+            var entry = new Manifest.ManifestEntry
             {
                 SteamID = account.Session.SteamID, Filename = filename, Salt = salt, IV = iv
-            });
+            };
+            if (replaceIndex >= 0)
+            {
+                next.Entries[replaceIndex] = entry;
+                // Conserver aussi les anciens IV/sel : le maFile d'origine reste intact.
+                // Un echec de cette copie doit arreter la restauration avant mutation.
+                var indexPath = Path.Combine(directory, "manifest.json");
+                File.Copy(indexPath, indexPath + ".before-recovery-" + Guid.NewGuid().ToString("N") + ".bak", false);
+            }
+            else next.Entries.Add(entry);
             WriteAtomic(Path.Combine(directory, filename), encrypted);
             // Si cette copie echoue, ne pas remplacer l'index endommage.
             manifest.PreserveUnreadableManifest();

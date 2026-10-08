@@ -15,7 +15,7 @@ namespace Steam_Desktop_Authenticator
     public partial class MainForm : Form
     {
         private SteamGuardAccount currentAccount = null;
-        private SteamGuardAccount[] allAccounts;
+        private SteamGuardAccount[] allAccounts = Array.Empty<SteamGuardAccount>();
         private List<string> updatedSessions = new List<string>();
         private Manifest manifest;
         private static SemaphoreSlim confirmationsSemaphore = new SemaphoreSlim(1, 1);
@@ -31,6 +31,8 @@ namespace Steam_Desktop_Authenticator
         public MainForm()
         {
             InitializeComponent();
+            timerSteamGuard.Stop();
+            timerTradesPopup.Stop();
             var transferItem = new ToolStripMenuItem("Transfer Authenticator");
             transferItem.Click += (_, _) =>
             {
@@ -67,37 +69,24 @@ namespace Steam_Desktop_Authenticator
             {
                 MessageBox.Show("Unable to read your settings. Try restating SDA.", "Steam Desktop Authenticator", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 this.Close();
+                return;
             }
 
-            // Make sure we don't show that welcome dialog again
+            // Deverrouiller avant toute sauvegarde de l'index ou connexion periodique.
+            // Un maFile illisible ne doit pas empecher l'acces a la recuperation.
+            if (!loadAccountsList())
+            {
+                Close();
+                return;
+            }
             this.manifest.FirstRun = false;
             this.manifest.Save();
-
-            // Tick first time manually to sync time
-            timerSteamGuard_Tick(new object(), EventArgs.Empty);
-
-            if (manifest.Encrypted)
-            {
-                if (passKey == null)
-                {
-                    passKey = manifest.PromptForPassKey();
-                    if (passKey == null)
-                    {
-                        Application.Exit();
-                    }
-                }
-
-                btnManageEncryption.Text = "Manage Encryption";
-            }
-            else
-            {
-                btnManageEncryption.Text = "Setup Encryption";
-            }
-
+            btnManageEncryption.Text = manifest.Encrypted ? "Manage Encryption" : "Setup Encryption";
             btnManageEncryption.Enabled = manifest.Entries.Count > 0;
 
             loadSettings();
-            loadAccountsList();
+            timerSteamGuard.Start();
+            timerSteamGuard_Tick(new object(), EventArgs.Empty);
 
             checkForUpdates();
 
@@ -560,9 +549,14 @@ namespace Steam_Desktop_Authenticator
         /// <summary>
         /// Decrypts files and populates list UI with accounts
         /// </summary>
-        private void loadAccountsList()
+        private bool loadAccountsList()
         {
+            timerSteamGuard.Stop();
+            timerTradesPopup.Stop();
             currentAccount = null;
+            allAccounts = Array.Empty<SteamGuardAccount>();
+            txtLoginToken.Clear();
+            menuDeactivateAuthenticator.Enabled = btnTradeConfirmations.Enabled = false;
 
             listAccounts.Items.Clear();
             listAccounts.SelectedIndex = -1;
@@ -570,7 +564,7 @@ namespace Steam_Desktop_Authenticator
             trayAccountList.Items.Clear();
             trayAccountList.SelectedIndex = -1;
 
-            allAccounts = manifest.GetAllAccounts(passKey);
+            if (!ReadAccountsWithRecovery()) return false;
 
             if (allAccounts.Length > 0)
             {
@@ -588,6 +582,59 @@ namespace Steam_Desktop_Authenticator
                 trayAccountList.Sorted = true;
             }
             menuDeactivateAuthenticator.Enabled = btnTradeConfirmations.Enabled = allAccounts.Length > 0;
+            timerSteamGuard.Start();
+            timerTradesPopup.Enabled = manifest.PeriodicChecking;
+            return true;
+        }
+
+        private bool ReadAccountsWithRecovery()
+        {
+            while (true)
+            {
+                if (manifest.Encrypted && passKey == null)
+                {
+                    using var password = new InputForm("Enter your SDA encryption password. Cancel to open recovery options.", true);
+                    password.ShowDialog(this);
+                    if (password.Canceled)
+                    {
+                        if (MessageBox.Show(this, "Open Recover saved transfer?", "Steam Desktop Authenticator",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes || !RecoverAccounts())
+                            return false;
+                        continue;
+                    }
+                    passKey = password.txtBox.Text;
+                }
+                try
+                {
+                    var accounts = manifest.GetValidatedAccounts(passKey);
+                    allAccounts = accounts;
+                    return true;
+                }
+                catch (Exception ex) when (ex is System.IO.IOException || ex is System.IO.InvalidDataException || ex is UnauthorizedAccessException ||
+                    ex is JsonException || ex is FormatException || ex is ArgumentException ||
+                    ex is System.Security.Cryptography.CryptographicException || ex is InvalidOperationException)
+                {
+                    var action = MessageBox.Show(this,
+                        "SDA could not unlock all account files. The password may be incorrect, or a file may be damaged or inaccessible.\n\n" +
+                        "Yes: try the password again.\nNo: open Recover saved transfer.\nCancel: leave the accounts unchanged.",
+                        "Steam Desktop Authenticator", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning);
+                    if (action == DialogResult.Cancel) return false;
+                    if (action == DialogResult.Yes) passKey = null;
+                    else if (!RecoverAccounts()) return false;
+                }
+            }
+        }
+
+        private bool RecoverAccounts()
+        {
+            using var recovery = new TransferAuthenticatorForm(recoveryOnly: true);
+            recovery.ShowDialog(this);
+            if (recovery.EncryptionPassphrase == null) return false;
+            manifest = Manifest.GetManifest(true);
+            passKey = recovery.EncryptionPassphrase;
+            btnManageEncryption.Text = manifest.Encrypted ? "Manage Encryption" : "Setup Encryption";
+            btnManageEncryption.Enabled = manifest.Entries.Count > 0;
+            return true;
         }
 
         private void listAccounts_KeyDown(object sender, KeyEventArgs e)

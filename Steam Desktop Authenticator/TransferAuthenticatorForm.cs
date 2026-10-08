@@ -42,9 +42,9 @@ namespace Steam_Desktop_Authenticator
             {
                 AutoSize = true, MaximumSize = new Size(510, 0),
                 Text = recoveryOnly
-                    ? "SDA cannot read its account index. Do not remove your Steam authenticator or start another transfer.\n\n" +
+                    ? "SDA could not unlock its accounts or read its account index. Do not remove your Steam authenticator or start another transfer.\n\n" +
                       "Recover an encrypted .sda-transfer backup below, or close SDA and restore your complete maFiles backup. Recovery is offline.\n\n" +
-                      "Existing account files and the unreadable index are preserved. Restore each missing account from its own backup."
+                      "Existing account files and the previous index are preserved. An indexed account that cannot be read requires your confirmation before local restoration."
                     : "Keep Steam Guard enabled on your phone. You need its current login code and access to the verified phone number for the SMS.\n\n" +
                     "Submitting the SMS code replaces the phone authenticator with SDA. Steam documents a 2-day trade and market restriction for transfers; Steam determines the actual restriction.\n\n" +
                     "Save the encryption password and the new recovery code. Do not remove the existing authenticator first."
@@ -72,16 +72,20 @@ namespace Steam_Desktop_Authenticator
             recover.Enabled = !value;
         }
 
-        private string RequestPassphrase(Manifest manifest)
+        private string RequestPassphrase(Manifest manifest, SteamGuardAccount recoveringAccount = null)
         {
-            if (!manifest.Encrypted && manifest.Entries.Count > 0)
+            bool recovering = recoveringAccount != null;
+            if (!manifest.Encrypted && manifest.Entries.Any(e => !recovering || e.SteamID != recoveringAccount.Session.SteamID))
                 throw new InvalidOperationException("Use Setup Encryption on your existing accounts before transferring another account.");
-            using var input = new InputForm(manifest.Encrypted ? "Enter your SDA encryption password." :
-                "Choose an encryption password for SDA and its recovery backup. Save it securely.", true);
+            var prompt = manifest.Encrypted ? "Enter your current SDA encryption password." :
+                "Choose an encryption password for SDA and its recovery backup. Save it securely.";
+            if (recovering && !manifest.Entries.Any(e => e.SteamID != recoveringAccount.Session.SteamID))
+                prompt = "Enter your current SDA encryption password. If it cannot be recovered, choose a new password for this restored account. Save it securely.";
+            using var input = new InputForm(prompt, true);
             input.ShowDialog(this);
             if (input.Canceled || string.IsNullOrWhiteSpace(input.txtBox.Text)) return null;
             var password = input.txtBox.Text;
-            if (manifest.Encrypted)
+            if (manifest.Encrypted && !recovering)
             {
                 if (!manifest.VerifyPasskey(password)) throw new InvalidOperationException("Incorrect SDA encryption password.");
             }
@@ -209,9 +213,15 @@ namespace Steam_Desktop_Authenticator
                 var account = AuthenticatorTransfer.ReadAccount(backup.Reply, backup.Session);
                 var directory = Path.Combine(Manifest.GetExecutableDir(), "maFiles");
                 var manifest = recoveryOnly ? Manifest.LoadForRecovery(directory) : Manifest.GetManifest();
-                var passphrase = RequestPassphrase(manifest);
+                var passphrase = RequestPassphrase(manifest, account);
                 if (passphrase == null) return;
-                TransferBackup.SaveAccount(directory, manifest, account, passphrase);
+                if (TransferBackup.ValidateRecovery(directory, manifest, account, passphrase) &&
+                    MessageBox.Show(this,
+                        "This account cannot be read with the password you entered. This may mean a wrong password or damaged data. Try your current SDA password first if it has changed.\n\n" +
+                        "Restore this local account from the selected backup? Use the backup from your latest successful transfer. SDA will preserve the original account file and a copy of the complete index. No request will be sent to Steam.",
+                        Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    return;
+                TransferBackup.RecoverAccount(directory, manifest, account, passphrase);
                 EncryptionPassphrase = passphrase;
                 ShowSuccess(account, backup.FilePath);
             }

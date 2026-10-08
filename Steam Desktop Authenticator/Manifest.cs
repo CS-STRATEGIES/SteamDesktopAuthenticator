@@ -326,6 +326,29 @@ namespace Steam_Desktop_Authenticator
             return accounts != null && accounts.Length == 1;
         }
 
+        internal static bool IsUsableAccount(SteamGuardAccount account, ulong steamId)
+        {
+            try
+            {
+                return steamId != 0 && account?.Session?.SteamID == steamId &&
+                    !string.IsNullOrWhiteSpace(account.AccountName) &&
+                    !string.IsNullOrWhiteSpace(account.SharedSecret) &&
+                    !string.IsNullOrWhiteSpace(account.IdentitySecret) &&
+                    Convert.FromBase64String(account.SharedSecret).Length > 0 &&
+                    Convert.FromBase64String(account.IdentitySecret).Length > 0;
+            }
+            catch (FormatException) { return false; }
+        }
+
+        internal SteamGuardAccount[] GetValidatedAccounts(string passphrase)
+        {
+            var accounts = GetAllAccounts(passphrase);
+            if (accounts.Length != Entries.Count ||
+                accounts.Where((account, index) => !IsUsableAccount(account, Entries[index].SteamID)).Any())
+                throw new InvalidDataException("SDA could not unlock complete account data. Use the current encryption password or Recover saved transfer.");
+            return accounts;
+        }
+
         public bool RemoveAccount(SteamGuardAccount account, bool deleteMaFile = true)
         {
             ManifestEntry entry = (from e in this.Entries where e.SteamID == account.Session.SteamID select e).FirstOrDefault();

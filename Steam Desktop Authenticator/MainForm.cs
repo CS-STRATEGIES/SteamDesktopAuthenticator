@@ -150,18 +150,18 @@ namespace Steam_Desktop_Authenticator
 
                 string curPassKey = currentPassKeyForm.txtBox.Text;
 
-                InputForm changePassKeyForm = new InputForm("Enter new passkey, or leave blank to remove encryption.");
+                InputForm changePassKeyForm = new InputForm("Enter new passkey, or leave blank to remove encryption.", password: true, allowEmpty: true);
                 changePassKeyForm.ShowDialog();
 
-                if (changePassKeyForm.Canceled && !string.IsNullOrEmpty(changePassKeyForm.txtBox.Text))
+                if (changePassKeyForm.Canceled)
                 {
                     return;
                 }
 
-                InputForm changePassKeyForm2 = new InputForm("Confirm new passkey, or leave blank to remove encryption.");
+                InputForm changePassKeyForm2 = new InputForm("Confirm new passkey, or leave blank to remove encryption.", password: true, allowEmpty: true);
                 changePassKeyForm2.ShowDialog();
 
-                if (changePassKeyForm2.Canceled && !string.IsNullOrEmpty(changePassKeyForm.txtBox.Text))
+                if (changePassKeyForm2.Canceled)
                 {
                     return;
                 }
@@ -187,6 +187,8 @@ namespace Steam_Desktop_Authenticator
                 }
                 else
                 {
+                    passKey = newPassKey;
+                    btnManageEncryption.Text = manifest.Encrypted ? "Manage Encryption" : "Setup Encryption";
                     MessageBox.Show("Passkey successfully " + action + "d.");
                     this.loadAccountsList();
                 }
@@ -194,6 +196,7 @@ namespace Steam_Desktop_Authenticator
             else
             {
                 passKey = manifest.PromptSetupPassKey();
+                btnManageEncryption.Text = manifest.Encrypted ? "Manage Encryption" : "Setup Encryption";
                 this.loadAccountsList();
             }
         }

@@ -6,11 +6,11 @@ de Node.js ou de Visual Studio n'est necessaire pour l'utiliser.
 
 ## Lancement
 
-Le dossier prepare pour le transfert est `artifacts/SDA-recovery-fixed-win-x64`.
+Le dossier prepare pour le transfert est `artifacts/SDA-storage-fixed-win-x64`.
 Depuis la racine du depot, lancer directement :
 
 ```powershell
-& '.\artifacts\SDA-recovery-fixed-win-x64\Steam Desktop Authenticator.exe'
+& '.\artifacts\SDA-storage-fixed-win-x64\Steam Desktop Authenticator.exe'
 ```
 
 Conserver les DLL et les autres fichiers a cote de l'executable. L'application
@@ -118,10 +118,25 @@ Les reconnexions conservent le nom du maFile existant : le rechiffrement porte
 ainsi sur le meme fichier. Cette correction ne supprime ni ne rechiffre
 automatiquement d'eventuelles copies creees avec une version precedente.
 
-Avant d'activer le compte principal dans EzSteam, verifier son reglage
-`cancelTime` : le code examine le 08/10/2026 fixe 900000 ms, soit une annulation
-automatique des offres envoyees apres 15 minutes. `null` desactive ce comportement.
-Cette modification concerne EzSteam et n'est pas effectuee par ce fork SDA.
+Les reconnexions et changements de chiffrement verifient tous les comptes avant
+ecriture. Une erreur d'ecriture restaure les anciens fichiers et ne produit pas
+de message de succes. Un journal temporaire protege par Windows permet aussi de
+reprendre une mise a jour interrompue au prochain lancement. En cas d'interruption,
+relancer SDA sur le meme ordinateur et avec le meme compte Windows avant de
+deplacer le dossier. Si la reprise est impossible, les nouvelles ecritures sont
+bloquees : conserver tout `maFiles` et la sauvegarde `.sda-transfer`.
+Le journal Windows temporaire ne remplace pas cette sauvegarde portable chiffree
+par mot de passe. Le bouton **Cancel** annule le changement de chiffrement ;
+pour retirer volontairement le chiffrement, valider les deux champs vides.
+
+Avant d'activer le compte principal dans EzSteam, verifier la version deployee.
+Au 08/10/2026, `main` fixe encore `cancelTime` a 900000 ms, soit une annulation
+automatique des offres envoyees apres 15 minutes, y compris creees ailleurs.
+La branche `moteur/integration` supprime deja ce comportement dans le
+[commit b24c4d8](https://github.com/CS-STRATEGIES/EzSteam/commit/b24c4d8a0e444f731be8a99a53f99fee1539ed8d),
+avec un test de non-regression. Cette correction appartient au chantier moteur ;
+sa presence sur la branche ne prouve pas son deploiement. Ce fork SDA ne modifie
+pas EzSteam.
 
 Apres redeploiement d'EzSteam, utiliser son `/docs` et le jeton Bearer pour verifier
 `GET /api/trades/status` (bon SteamID, `isLoggedIn` et secrets presents),
@@ -157,6 +172,9 @@ nouveau les secrets : ne pas supposer que ceux d'EzSteam resteront valides.
 - Recuperation d'un maFile illisible avec index valide, controle de tous les autres
   comptes, refus d'une ancienne sauvegarde sur un compte lisible et preservation
   exacte de l'ancien fichier et de l'index avant remplacement.
+- Refus d'ecriture sur compte ou index verrouille, validation des comptes avant
+  rechiffrement, rollback apres une erreur d'ecriture et reprise au redemarrage
+  apres interruption d'un processus de verification contenant des comptes fictifs.
 
 La verification ne constitue pas un audit complet du code. Le format de chiffrement
 historique de SDA est conserve et l'authentification reelle n'est pas testee par les
@@ -170,7 +188,7 @@ Avec le SDK .NET 10.0.401 et Git :
 ```powershell
 git clone --recurse-submodules https://github.com/CS-STRATEGIES/SteamDesktopAuthenticator.git
 cd SteamDesktopAuthenticator
-.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-recovery-fixed-win-x64'
+.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-storage-fixed-win-x64'
 ```
 
 Le script refuse un dossier de sortie existant afin de ne pas ecraser ou inclure

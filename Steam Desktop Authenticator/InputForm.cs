@@ -14,11 +14,13 @@ namespace Steam_Desktop_Authenticator
     {
         public bool Canceled = false;
         private bool userClosed = true;
+        private readonly bool allowEmpty;
 
-        public InputForm(string label, bool password = false)
+        public InputForm(string label, bool password = false, bool allowEmpty = false)
         {
             InitializeComponent();
             this.labelText.Text = label;
+            this.allowEmpty = allowEmpty;
 
             if (password)
             {
@@ -28,18 +30,9 @@ namespace Steam_Desktop_Authenticator
 
         private void btnAccept_Click(object sender, EventArgs e)
         {
-            if (string.IsNullOrEmpty(this.txtBox.Text))
-            {
-                this.Canceled = true;
-                this.userClosed = false;
-                this.Close();
-            }
-            else
-            {
-                this.Canceled = false;
-                this.userClosed = false;
-                this.Close();
-            }
+            this.Canceled = !allowEmpty && string.IsNullOrEmpty(this.txtBox.Text);
+            this.userClosed = false;
+            this.Close();
         }
 
         private void btnCancel_Click(object sender, EventArgs e)

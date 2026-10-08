@@ -115,6 +115,7 @@ namespace Steam_Desktop_Authenticator
 
         internal static bool ValidateRecovery(string directory, Manifest manifest, SteamGuardAccount account, string passphrase)
         {
+            RequireCompletedStorageUpdate(directory);
             ArgumentException.ThrowIfNullOrWhiteSpace(passphrase);
             var matching = manifest.Entries.Where(e => e.SteamID == account.Session.SteamID).ToArray();
             if (matching.Length > 1)
@@ -161,6 +162,7 @@ namespace Steam_Desktop_Authenticator
 
         private static void SaveAccountCore(string directory, Manifest manifest, SteamGuardAccount account, string passphrase, int replaceIndex = -1)
         {
+            RequireCompletedStorageUpdate(directory);
             ArgumentException.ThrowIfNullOrWhiteSpace(passphrase);
             var salt = FileEncryptor.GetRandomSalt();
             var iv = FileEncryptor.GetInitializationVector();
@@ -192,6 +194,12 @@ namespace Steam_Desktop_Authenticator
             manifest.Entries = next.Entries;
             manifest.Encrypted = true;
             manifest.CompleteRecovery();
+        }
+
+        private static void RequireCompletedStorageUpdate(string directory)
+        {
+            if (AccountStorageTransaction.IsPending(directory))
+                throw new IOException("Restart SDA to recover the interrupted account update before importing a transfer.");
         }
 
         internal static void WriteAtomic(string path, string text)

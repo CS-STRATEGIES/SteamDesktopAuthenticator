@@ -115,9 +115,16 @@ namespace Steam_Desktop_Authenticator
             if (LoginReason == LoginType.Refresh)
             {
                 Manifest man = Manifest.GetManifest();
+                var previousSession = account.Session;
+                var previouslyEnrolled = account.FullyEnrolled;
                 account.FullyEnrolled = true;
                 account.Session = sessionData;
-                HandleManifest(man, true);
+                if (!HandleManifest(man, true))
+                {
+                    account.Session = previousSession;
+                    account.FullyEnrolled = previouslyEnrolled;
+                    Session = null;
+                }
                 this.Close();
                 return;
             }
@@ -248,7 +255,12 @@ namespace Steam_Desktop_Authenticator
             }
 
             //Linked, finally. Re-save with FullyEnrolled property.
-            manifest.SaveAccount(linker.LinkedAccount, passKey != null, passKey);
+            if (!manifest.SaveAccount(linker.LinkedAccount, passKey != null, passKey))
+            {
+                MessageBox.Show("Steam linked the authenticator, but SDA could not save its final state. Keep your account files and recovery code. Do not add or remove the authenticator again.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                this.Close();
+                return;
+            }
             MessageBox.Show("Mobile authenticator successfully linked. Please write down your revocation code: " + linker.LinkedAccount.RevocationCode);
             this.Close();
         }
@@ -341,7 +353,7 @@ namespace Steam_Desktop_Authenticator
             }
         }
 
-        private void HandleManifest(Manifest man, bool IsRefreshing = false)
+        private bool HandleManifest(Manifest man, bool IsRefreshing = false)
         {
             string passKey = null;
             if (man.Entries.Count == 0)
@@ -367,12 +379,16 @@ namespace Steam_Desktop_Authenticator
                     else
                     {
                         this.Close();
-                        return;
+                        return false;
                     }
                 }
             }
 
-            man.SaveAccount(account, passKey != null, passKey);
+            if (!man.SaveAccount(account, passKey != null, passKey))
+            {
+                MessageBox.Show("SDA could not save the account. The session refresh was not saved. Keep your account files and encrypted transfer backup, check disk access, then try again.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
             if (IsRefreshing)
             {
                 MessageBox.Show("Your session was refreshed.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -382,6 +398,7 @@ namespace Steam_Desktop_Authenticator
                 MessageBox.Show("Mobile authenticator successfully linked. Please write down your revocation code: " + account.RevocationCode, "Steam Login", MessageBoxButtons.OK);
             }
             this.Close();
+            return true;
         }
 
         private void LoginForm_Load(object sender, EventArgs e)

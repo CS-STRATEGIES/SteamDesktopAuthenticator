@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Forms;
@@ -13,8 +14,29 @@ internal static class OfflineChecks
     private static int checks;
 
     [STAThread]
-    private static void Main()
+    private static int Main(string[] arguments)
     {
+        // Les echecs de verification doivent rester dans le journal du terminal,
+        // sans ouvrir de boite de dialogue Windows sur le bureau de l'utilisateur.
+        SetErrorMode(0x0001 | 0x0002);
+        try
+        {
+            Run(arguments);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine(error);
+            return 1;
+        }
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern uint SetErrorMode(uint mode);
+
+    private static void Run(string[] arguments)
+    {
+        if (StorageWriteChecks.TryRunInterruptedWrite(arguments)) return;
         // Donnees fictives exclusivement. Aucun appel reseau ni fichier de compte.
         var account = new SteamGuardAccount
         {
@@ -62,6 +84,8 @@ internal static class OfflineChecks
         checks += TransferChecks.Run();
         checks += ManifestChecks.Run();
         checks += RecoveryChecks.Run();
+        checks += StorageWriteChecks.Run();
+        checks += EncryptionUiChecks.Run();
         Console.WriteLine($"{checks} verifications hors ligne reussies.");
     }
 

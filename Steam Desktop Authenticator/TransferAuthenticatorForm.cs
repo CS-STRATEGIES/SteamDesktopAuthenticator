@@ -107,6 +107,8 @@ namespace Steam_Desktop_Authenticator
             bool finalRequestAttempted = false;
             try
             {
+                if (AccountStorageTransaction.IsPending(Path.Combine(Manifest.GetExecutableDir(), "maFiles")))
+                    throw new InvalidOperationException("Restart SDA to recover the interrupted account update before starting a transfer.");
                 using var login = new LoginForm(LoginForm.LoginType.Transfer);
                 login.ShowDialog(this);
                 if (login.Session == null) return;

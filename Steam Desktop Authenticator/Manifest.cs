@@ -76,6 +76,7 @@ namespace Steam_Desktop_Authenticator
         {
             try
             {
+                AccountStorageTransaction.Recover(directory);
                 var manifest = JsonConvert.DeserializeObject<Manifest>(File.ReadAllText(Path.Combine(directory, "manifest.json")));
                 if (manifest?.Entries == null || manifest.Entries.Any(e => e == null ||
                     string.IsNullOrWhiteSpace(e.Filename) || Path.GetFileName(e.Filename) != e.Filename))
@@ -92,6 +93,9 @@ namespace Steam_Desktop_Authenticator
 
         internal static Manifest LoadForRecovery(string directory)
         {
+            // Une reprise transactionnelle impossible ne doit pas etre confondue
+            // avec un index absent puis ecrasee par une restauration de transfert.
+            AccountStorageTransaction.Recover(directory);
             try { return LoadFromDirectory(directory); }
             catch (ManifestParseException)
             {
@@ -247,6 +251,8 @@ namespace Steam_Desktop_Authenticator
 
         public SteamAuth.SteamGuardAccount[] GetAllAccounts(string passKey = null, int limit = -1)
         {
+            if (AccountStorageTransaction.IsPending(AccountDirectory))
+                throw new InvalidDataException("An interrupted account update must be recovered before reading accounts.");
             if (passKey == null && this.Encrypted) return new SteamGuardAccount[0];
             string maDir = AccountDirectory + Path.DirectorySeparatorChar;
 
@@ -274,48 +280,46 @@ namespace Steam_Desktop_Authenticator
 
         public bool ChangeEncryptionKey(string oldKey, string newKey)
         {
-            if (this.Encrypted)
+            try
             {
-                if (!this.VerifyPasskey(oldKey))
+                if (AccountStorageTransaction.IsPending(AccountDirectory)) return false;
+                GetValidatedAccounts(oldKey);
+                bool toEncrypt = newKey != null;
+                if (toEncrypt && newKey.Length == 0) return false;
+                var next = JsonConvert.DeserializeObject<Manifest>(JsonConvert.SerializeObject(this));
+                var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+                try
                 {
-                    return false;
+                    for (int i = 0; i < next.Entries.Count; i++)
+                    {
+                        var entry = next.Entries[i];
+                        // Conserver aussi les champs inconnus et le formatage du
+                        // maFile : un changement de mot de passe ne doit pas les perdre.
+                        var contents = File.ReadAllText(Path.Combine(AccountDirectory, entry.Filename));
+                        if (Encrypted)
+                            contents = FileEncryptor.DecryptData(oldKey, Entries[i].Salt, Entries[i].IV, contents);
+                        if (!IsUsableAccount(JsonConvert.DeserializeObject<SteamGuardAccount>(contents), entry.SteamID))
+                            return false;
+                        entry.Salt = toEncrypt ? FileEncryptor.GetRandomSalt() : null;
+                        entry.IV = toEncrypt ? FileEncryptor.GetInitializationVector() : null;
+                        if (toEncrypt)
+                            contents = FileEncryptor.EncryptData(newKey, entry.Salt, entry.IV, contents);
+                        files.Add(entry.Filename, Encoding.UTF8.GetBytes(contents));
+                    }
+                    next.Encrypted = toEncrypt;
+                    AccountStorageTransaction.Commit(AccountDirectory, files,
+                        Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(next)));
+                    Entries = next.Entries;
+                    Encrypted = next.Encrypted;
+                    return true;
+                }
+                finally
+                {
+                    foreach (var bytes in files.Values)
+                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes);
                 }
             }
-            bool toEncrypt = newKey != null;
-
-            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
-            for (int i = 0; i < this.Entries.Count; i++)
-            {
-                ManifestEntry entry = this.Entries[i];
-                string filename = maDir + entry.Filename;
-                if (!File.Exists(filename)) continue;
-
-                string fileContents = File.ReadAllText(filename);
-                if (this.Encrypted)
-                {
-                    fileContents = FileEncryptor.DecryptData(oldKey, entry.Salt, entry.IV, fileContents);
-                }
-
-                string newSalt = null;
-                string newIV = null;
-                string toWriteFileContents = fileContents;
-
-                if (toEncrypt)
-                {
-                    newSalt = FileEncryptor.GetRandomSalt();
-                    newIV = FileEncryptor.GetInitializationVector();
-                    toWriteFileContents = FileEncryptor.EncryptData(newKey, newSalt, newIV, fileContents);
-                }
-
-                File.WriteAllText(filename, toWriteFileContents);
-                entry.IV = newIV;
-                entry.Salt = newSalt;
-            }
-
-            this.Encrypted = toEncrypt;
-
-            this.Save();
-            return true;
+            catch (Exception) { return false; }
         }
 
         public bool VerifyPasskey(string passkey)
@@ -342,6 +346,9 @@ namespace Steam_Desktop_Authenticator
 
         internal SteamGuardAccount[] GetValidatedAccounts(string passphrase)
         {
+            if (Entries.Select(entry => entry.SteamID).Distinct().Count() != Entries.Count ||
+                Entries.Select(entry => entry.Filename).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Entries.Count)
+                throw new InvalidDataException("SDA account entries must be unique.");
             var accounts = GetAllAccounts(passphrase);
             if (accounts.Length != Entries.Count ||
                 accounts.Where((account, index) => !IsUsableAccount(account, Entries[index].SteamID)).Any())
@@ -383,72 +390,47 @@ namespace Steam_Desktop_Authenticator
         {
             if (encrypt && String.IsNullOrEmpty(passKey)) return false;
             if (!encrypt && this.Encrypted) return false;
-
-            string salt = null;
-            string iV = null;
-            string jsonAccount = JsonConvert.SerializeObject(account);
-
-            if (encrypt)
-            {
-                salt = FileEncryptor.GetRandomSalt();
-                iV = FileEncryptor.GetInitializationVector();
-                string encrypted = FileEncryptor.EncryptData(passKey, salt, iV, jsonAccount);
-                if (encrypted == null) return false;
-                jsonAccount = encrypted;
-            }
-
-            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
-            // Une reconnexion doit conserver le fichier du transfert : changer de
-            // nom laisserait un ancien maFile hors des changements de chiffrement.
-            var existing = this.Entries.FirstOrDefault(e => e.SteamID == account.Session.SteamID);
-            string filename = existing?.Filename ?? account.Session.SteamID.ToString() + ".maFile";
-
-            ManifestEntry newEntry = new ManifestEntry()
-            {
-                SteamID = account.Session.SteamID,
-                IV = iV,
-                Salt = salt,
-                Filename = filename
-            };
-
-            bool foundExistingEntry = false;
-            for (int i = 0; i < this.Entries.Count; i++)
-            {
-                if (this.Entries[i].SteamID == account.Session.SteamID)
-                {
-                    this.Entries[i] = newEntry;
-                    foundExistingEntry = true;
-                    break;
-                }
-            }
-
-            if (!foundExistingEntry)
-            {
-                this.Entries.Add(newEntry);
-            }
-
-            bool wasEncrypted = this.Encrypted;
-            this.Encrypted = encrypt || this.Encrypted;
-
-            if (!this.Save())
-            {
-                this.Encrypted = wasEncrypted;
-                return false;
-            }
-
             try
             {
-                File.WriteAllText(maDir + filename, jsonAccount);
+                if (AccountStorageTransaction.IsPending(AccountDirectory) ||
+                    !IsUsableAccount(account, account?.Session?.SteamID ?? 0)) return false;
+                GetValidatedAccounts(passKey);
+                // Ajouter un compte chiffre ne doit pas changer le flag d'anciens
+                // comptes en clair sans les chiffrer eux aussi.
+                if (encrypt && !Encrypted && Entries.Count != 0) return false;
+                var next = JsonConvert.DeserializeObject<Manifest>(JsonConvert.SerializeObject(this));
+                var index = next.Entries.FindIndex(entry => entry.SteamID == account.Session.SteamID);
+                var filename = index >= 0 ? next.Entries[index].Filename : account.Session.SteamID + ".maFile";
+                if (index < 0 && File.Exists(Path.Combine(AccountDirectory, filename)))
+                    filename = account.Session.SteamID + "-" + Guid.NewGuid().ToString("N") + ".maFile";
+                var entry = new ManifestEntry
+                {
+                    SteamID = account.Session.SteamID, Filename = filename,
+                    Salt = encrypt ? FileEncryptor.GetRandomSalt() : null,
+                    IV = encrypt ? FileEncryptor.GetInitializationVector() : null
+                };
+                var contents = JsonConvert.SerializeObject(account);
+                if (encrypt) contents = FileEncryptor.EncryptData(passKey, entry.Salt, entry.IV, contents);
+                if (index >= 0) next.Entries[index] = entry;
+                else next.Entries.Add(entry);
+                next.Encrypted = encrypt || Encrypted;
+                var bytes = Encoding.UTF8.GetBytes(contents);
+                try
+                {
+                    AccountStorageTransaction.Commit(AccountDirectory, new Dictionary<string, byte[]> { [filename] = bytes },
+                        Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(next)));
+                }
+                finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
+                Entries = next.Entries;
+                Encrypted = next.Encrypted;
                 return true;
             }
-            catch (Exception)
-            {
-                return false;
-            }
+            catch (Exception) { return false; }
         }
 
         public bool Save()
         {
+            if (AccountStorageTransaction.IsPending(AccountDirectory)) return false;
             string maDir = AccountDirectory + Path.DirectorySeparatorChar;
             string filename = maDir + "manifest.json";
             if (!Directory.Exists(maDir))
@@ -466,7 +448,7 @@ namespace Steam_Desktop_Authenticator
             try
             {
                 string contents = JsonConvert.SerializeObject(this);
-                File.WriteAllText(filename, contents);
+                AccountStorageTransaction.WriteAtomic(filename, Encoding.UTF8.GetBytes(contents), true);
                 return true;
             }
             catch (Exception)

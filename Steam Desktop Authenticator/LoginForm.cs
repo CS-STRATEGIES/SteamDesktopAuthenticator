@@ -161,61 +161,33 @@ namespace Steam_Desktop_Authenticator
             // Begin linking mobile authenticator
             AuthenticatorLinker linker = new AuthenticatorLinker(sessionData);
 
-            AuthenticatorLinker.LinkResult linkResponse = AuthenticatorLinker.LinkResult.GeneralFailure;
-            while (linkResponse != AuthenticatorLinker.LinkResult.AwaitingFinalization)
+            AuthenticatorLinker.LinkResult linkResponse;
+            try
             {
-                try
+                // SteamAuth verifies the phone separately before adding the authenticator.
+                if (!await EnsurePhoneLinkedAsync(linker))
                 {
-                    linkResponse = await linker.AddAuthenticator();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Error adding your authenticator: " + ex.Message, "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     ResetLoginButton();
                     return;
                 }
+                linkResponse = await linker.AddAuthenticator();
+            }
+            catch (Exception)
+            {
+                MessageBox.Show("Unable to verify your phone or add your authenticator. Please check your connection and try again.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ResetLoginButton();
+                return;
+            }
 
-                switch (linkResponse)
-                {
-                    case AuthenticatorLinker.LinkResult.MustProvidePhoneNumber:
-
-                        // Show the phone input form
-                        PhoneInputForm phoneInputForm = new PhoneInputForm(account);
-                        phoneInputForm.ShowDialog();
-                        if (phoneInputForm.Canceled)
-                        {
-                            this.Close();
-                            return;
-                        }
-
-                        linker.PhoneNumber = phoneInputForm.PhoneNumber;
-                        linker.PhoneCountryCode = phoneInputForm.CountryCode;
-                        break;
-
-                    case AuthenticatorLinker.LinkResult.AuthenticatorPresent:
-                        MessageBox.Show("This account already has an authenticator linked. You must remove that authenticator to add SDA as your authenticator.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        this.Close();
-                        return;
-
-                    case AuthenticatorLinker.LinkResult.FailureAddingPhone:
-                        MessageBox.Show("Failed to add your phone number. Please try again or use a different phone number.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        linker.PhoneNumber = null;
-                        break;
-
-                    case AuthenticatorLinker.LinkResult.MustRemovePhoneNumber:
-                        linker.PhoneNumber = null;
-                        break;
-
-                    case AuthenticatorLinker.LinkResult.MustConfirmEmail:
-                        MessageBox.Show("Please check your email, and click the link Steam sent you before continuing.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        break;
-
-                    case AuthenticatorLinker.LinkResult.GeneralFailure:
-                        MessageBox.Show("Error adding your authenticator.", "Steam Login Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        this.Close();
-                        return;
-                }
-            } // End while loop checking for AwaitingFinalization
+            if (linkResponse != AuthenticatorLinker.LinkResult.AwaitingFinalization)
+            {
+                string message = linkResponse == AuthenticatorLinker.LinkResult.AuthenticatorPresent
+                    ? "This account already has an authenticator linked. SDA cannot import its secrets by logging in."
+                    : "Unable to add your authenticator. Check that your phone number is verified in Steam and try again.";
+                MessageBox.Show(message, "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ResetLoginButton();
+                return;
+            }
 
             Manifest manifest = Manifest.GetManifest();
             string passKey = null;
@@ -306,6 +278,53 @@ namespace Steam_Desktop_Authenticator
             manifest.SaveAccount(linker.LinkedAccount, passKey != null, passKey);
             MessageBox.Show("Mobile authenticator successfully linked. Please write down your revocation code: " + linker.LinkedAccount.RevocationCode);
             this.Close();
+        }
+
+        private async Task<bool> EnsurePhoneLinkedAsync(AuthenticatorLinker linker)
+        {
+            while (true)
+            {
+                switch (await linker.AddPhoneNumber())
+                {
+                    case AuthenticatorLinker.PhoneLinkResult.PhoneAdded:
+                        // Recheck with a fresh linker: upstream does not validate the SMS response.
+                        var verification = new AuthenticatorLinker(Session);
+                        if (await verification.AddPhoneNumber() == AuthenticatorLinker.PhoneLinkResult.PhoneAdded)
+                            return true;
+                        MessageBox.Show("Your phone number is not verified. Please verify it in Steam before continuing.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false;
+
+                    case AuthenticatorLinker.PhoneLinkResult.MustProvidePhoneNumber:
+                        using (var phoneForm = new PhoneInputForm(account))
+                        {
+                            phoneForm.ShowDialog(this);
+                            if (phoneForm.Canceled || string.IsNullOrWhiteSpace(phoneForm.PhoneNumber))
+                                return false;
+                            linker.PhoneNumber = phoneForm.PhoneNumber;
+                            linker.PhoneCountryCode = phoneForm.CountryCode;
+                        }
+                        break;
+
+                    case AuthenticatorLinker.PhoneLinkResult.MustConfirmEmail:
+                        if (MessageBox.Show("Please confirm the email sent by Steam, then click OK to continue.", "Steam Login", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+                            return false;
+                        break;
+
+                    case AuthenticatorLinker.PhoneLinkResult.MustConfirmSMS:
+                        using (var smsForm = new InputForm("Enter the SMS code to verify your phone number:"))
+                        {
+                            smsForm.ShowDialog(this);
+                            if (smsForm.Canceled || string.IsNullOrWhiteSpace(smsForm.txtBox.Text))
+                                return false;
+                            linker.PhoneSMSCode = smsForm.txtBox.Text.Trim();
+                        }
+                        break;
+
+                    default:
+                        MessageBox.Show("Unable to verify your phone number. Please verify it in Steam and try again.", "Steam Login", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false;
+                }
+            }
         }
 
         private void HandleManifest(Manifest man, bool IsRefreshing = false)

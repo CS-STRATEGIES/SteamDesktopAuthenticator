@@ -23,7 +23,7 @@ namespace Steam_Desktop_Authenticator
             this.PhoneNumber = txtPhoneNumber.Text;
             this.CountryCode = txtCountryCode.Text;
 
-            if (this.PhoneNumber[0] != '+')
+            if (string.IsNullOrWhiteSpace(this.PhoneNumber) || this.PhoneNumber[0] != '+')
             {
                 MessageBox.Show("Phone number must start with + and country code.", "Phone Number", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;

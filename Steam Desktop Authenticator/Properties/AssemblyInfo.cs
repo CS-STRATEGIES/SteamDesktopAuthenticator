@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("Steam Desktop Authenticator")]
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows7.0")]
 [assembly: AssemblyDescription("Desktop implementation of Steam's mobile authenticator app")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]

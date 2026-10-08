@@ -38,6 +38,11 @@ namespace Steam_Desktop_Authenticator
 
         private static Manifest _manifest { get; set; }
 
+        // Lie chaque index a son dossier, y compris les dossiers fictifs des tests.
+        internal string DataDirectory { get; private set; }
+        internal bool NeedsRecovery { get; private set; }
+        private string AccountDirectory => DataDirectory ?? Path.Combine(GetExecutableDir(), "maFiles");
+
         public static string GetExecutableDir()
         {
             return Path.GetDirectoryName(System.Reflection.Assembly.GetEntryAssembly().Location);
@@ -51,43 +56,63 @@ namespace Steam_Desktop_Authenticator
                 return _manifest;
             }
 
-            // Find config dir and manifest file
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
-            string manifestFile = maDir + "manifest.json";
+            _manifest = null;
+            string maDir = Path.Combine(GetExecutableDir(), "maFiles");
 
             // If there's no config dir, create it
             if (!Directory.Exists(maDir))
             {
                 _manifest = GenerateNewManifest(false);
+                if (_manifest == null) throw new ManifestParseException();
                 return _manifest;
             }
 
-            // If there's no manifest, throw exception
-            if (!File.Exists(manifestFile))
-            {
-                throw new ManifestParseException();
-            }
+            // Ne mettre en cache qu'un index entierement valide.
+            _manifest = LoadFromDirectory(maDir);
+            return _manifest;
+        }
 
+        internal static Manifest LoadFromDirectory(string directory)
+        {
             try
             {
-                string manifestContents = File.ReadAllText(manifestFile);
-                _manifest = JsonConvert.DeserializeObject<Manifest>(manifestContents);
-
-                if (_manifest.Encrypted && _manifest.Entries.Count == 0)
-                {
-                    _manifest.Encrypted = false;
-                    _manifest.Save();
-                }
-
-                _manifest.RecomputeExistingEntries();
-
-                return _manifest;
+                var manifest = JsonConvert.DeserializeObject<Manifest>(File.ReadAllText(Path.Combine(directory, "manifest.json")));
+                if (manifest?.Entries == null || manifest.Entries.Any(e => e == null ||
+                    string.IsNullOrWhiteSpace(e.Filename) || Path.GetFileName(e.Filename) != e.Filename))
+                    throw new ManifestParseException();
+                manifest.DataDirectory = directory;
+                manifest.RecomputeExistingEntries();
+                return manifest;
             }
             catch (Exception)
             {
                 throw new ManifestParseException();
             }
         }
+
+        internal static Manifest LoadForRecovery(string directory)
+        {
+            try { return LoadFromDirectory(directory); }
+            catch (ManifestParseException)
+            {
+                // Aucun fichier n'est modifie avant la restauration effective.
+                return new Manifest
+                {
+                    DataDirectory = directory, NeedsRecovery = true,
+                    Entries = new List<ManifestEntry>()
+                };
+            }
+        }
+
+        internal void PreserveUnreadableManifest()
+        {
+            if (!NeedsRecovery) return;
+            var path = Path.Combine(AccountDirectory, "manifest.json");
+            if (File.Exists(path))
+                File.Copy(path, path + ".unreadable-" + Guid.NewGuid().ToString("N") + ".bak", false);
+        }
+
+        internal void CompleteRecovery() => NeedsRecovery = false;
 
         public static Manifest GenerateNewManifest(bool scanDir = false)
         {
@@ -223,7 +248,7 @@ namespace Steam_Desktop_Authenticator
         public SteamAuth.SteamGuardAccount[] GetAllAccounts(string passKey = null, int limit = -1)
         {
             if (passKey == null && this.Encrypted) return new SteamGuardAccount[0];
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
+            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
 
             List<SteamAuth.SteamGuardAccount> accounts = new List<SteamAuth.SteamGuardAccount>();
             foreach (var entry in this.Entries)
@@ -258,7 +283,7 @@ namespace Steam_Desktop_Authenticator
             }
             bool toEncrypt = newKey != null;
 
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
+            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
             for (int i = 0; i < this.Entries.Count; i++)
             {
                 ManifestEntry entry = this.Entries[i];
@@ -306,7 +331,7 @@ namespace Steam_Desktop_Authenticator
             ManifestEntry entry = (from e in this.Entries where e.SteamID == account.Session.SteamID select e).FirstOrDefault();
             if (entry == null) return true; // If something never existed, did you do what they asked?
 
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
+            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
             string filename = maDir + entry.Filename;
             this.Entries.Remove(entry);
 
@@ -349,8 +374,11 @@ namespace Steam_Desktop_Authenticator
                 jsonAccount = encrypted;
             }
 
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
-            string filename = account.Session.SteamID.ToString() + ".maFile";
+            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
+            // Une reconnexion doit conserver le fichier du transfert : changer de
+            // nom laisserait un ancien maFile hors des changements de chiffrement.
+            var existing = this.Entries.FirstOrDefault(e => e.SteamID == account.Session.SteamID);
+            string filename = existing?.Filename ?? account.Session.SteamID.ToString() + ".maFile";
 
             ManifestEntry newEntry = new ManifestEntry()
             {
@@ -398,7 +426,7 @@ namespace Steam_Desktop_Authenticator
 
         public bool Save()
         {
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
+            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
             string filename = maDir + "manifest.json";
             if (!Directory.Exists(maDir))
             {
@@ -427,7 +455,7 @@ namespace Steam_Desktop_Authenticator
         private void RecomputeExistingEntries()
         {
             List<ManifestEntry> newEntries = new List<ManifestEntry>();
-            string maDir = Manifest.GetExecutableDir() + "/maFiles/";
+            string maDir = AccountDirectory + Path.DirectorySeparatorChar;
 
             foreach (var entry in this.Entries)
             {

@@ -116,7 +116,7 @@ namespace Steam_Desktop_Authenticator
             if (encrypted == null) throw new IOException("Unable to encrypt the account.");
 
             // Un nom unique permet de recuperer apres un echec du manifest sans ecraser
-            // un maFile orphelin. Les rafraichissements suivants utilisent le format SDA normal.
+            // un maFile orphelin. Les rafraichissements suivants conservent ce nom.
             var filename = account.Session.SteamID + "-" + Guid.NewGuid().ToString("N") + ".maFile";
             var next = JsonConvert.DeserializeObject<Manifest>(JsonConvert.SerializeObject(manifest));
             next.Encrypted = true;
@@ -125,9 +125,12 @@ namespace Steam_Desktop_Authenticator
                 SteamID = account.Session.SteamID, Filename = filename, Salt = salt, IV = iv
             });
             WriteAtomic(Path.Combine(directory, filename), encrypted);
+            // Si cette copie echoue, ne pas remplacer l'index endommage.
+            manifest.PreserveUnreadableManifest();
             WriteAtomic(Path.Combine(directory, "manifest.json"), JsonConvert.SerializeObject(next));
             manifest.Entries = next.Entries;
             manifest.Encrypted = true;
+            manifest.CompleteRecovery();
         }
 
         internal static void WriteAtomic(string path, string text)

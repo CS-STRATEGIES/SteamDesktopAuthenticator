@@ -60,6 +60,7 @@ internal static class OfflineChecks
         var steam = new SteamClient();
         Equal(false, steam.IsConnected, "Initialisation SteamKit sans connexion");
         checks += TransferChecks.Run();
+        checks += ManifestChecks.Run();
         Console.WriteLine($"{checks} verifications hors ligne reussies.");
     }
 

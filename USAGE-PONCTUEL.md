@@ -6,11 +6,11 @@ de Node.js ou de Visual Studio n'est necessaire pour l'utiliser.
 
 ## Lancement
 
-Le dossier prepare pour le transfert est `artifacts/SDA-transfer-win-x64`.
+Le dossier prepare pour le transfert est `artifacts/SDA-transfer-fixed-win-x64`.
 Depuis la racine du depot, lancer directement :
 
 ```powershell
-& '.\artifacts\SDA-transfer-win-x64\Steam Desktop Authenticator.exe'
+& '.\artifacts\SDA-transfer-fixed-win-x64\Steam Desktop Authenticator.exe'
 ```
 
 Conserver les DLL et les autres fichiers a cote de l'executable. L'application
@@ -68,6 +68,13 @@ le chiffrement historique de SDA pour compatibilite.
   enregistre, rouvrir **File > Transfer Authenticator > Recover saved transfer**.
   Choisir la sauvegarde et son mot de passe. Cette recuperation fonctionne hors
   ligne et n'effectue aucun nouveau transfert.
+- Si `manifest.json` est absent ou illisible, SDA ouvre directement **Recover
+  saved transfer** au demarrage. Choisir une sauvegarde `.sda-transfer` valide.
+  Le programme conserve l'index illisible dans `manifest.json.unreadable-*.bak`
+  avant de reconstruire l'index avec le compte recupere. Les anciens maFiles et
+  les sauvegardes restent intacts. Recuperer chaque autre compte depuis sa propre
+  sauvegarde, ou fermer SDA et restaurer une sauvegarde complete de `maFiles`.
+  Annuler ou saisir un mauvais mot de passe ne reinitialise pas l'index.
 - Apres une coupure reseau, Steam peut avoir termine l'operation sans que SDA ait
   recu les nouveaux secrets. Une sauvegarde sans reponse ne peut pas les recreer.
   Verifier le compte avec Steam ou son assistance avant toute nouvelle tentative.
@@ -89,6 +96,9 @@ champs vides. Cela dechiffre tous les comptes locaux. Copier les valeurs necessa
 dans le gestionnaire de secrets, fermer le fichier, puis reactiver
 **Setup Encryption**. La sauvegarde `.sda-transfer` reste chiffree avec son mot de
 passe d'origine. Garder ce mot de passe meme si celui des maFiles change.
+Les reconnexions conservent le nom du maFile existant : le rechiffrement porte
+ainsi sur le meme fichier. Cette correction ne supprime ni ne rechiffre
+automatiquement d'eventuelles copies creees avec une version precedente.
 
 Avant d'activer le compte principal dans EzSteam, verifier son reglage
 `cancelTime` : le code examine le 08/10/2026 fixe 900000 ms, soit une annulation
@@ -123,6 +133,9 @@ nouveau les secrets : ne pas supposer que ceux d'EzSteam resteront valides.
 - Controles hors ligne avec des donnees fictives : codes Steam Guard, import,
   compatibilite du chiffrement, construction des formulaires, protocole de transfert,
   refus SMS, perte reseau, reponses incompletes, sauvegarde et recuperation.
+- Non-regression : reconnexion entre dechiffrement et rechiffrement, recuperation
+  avec index absent ou invalide, preservation des autres comptes, annulation,
+  mauvais mot de passe et echec d'ecriture suivi d'une nouvelle recuperation locale.
 
 La verification ne constitue pas un audit complet du code. Le format de chiffrement
 historique de SDA est conserve et l'authentification reelle n'est pas testee par les
@@ -136,7 +149,7 @@ Avec le SDK .NET 10.0.401 et Git :
 ```powershell
 git clone --recurse-submodules https://github.com/CS-STRATEGIES/SteamDesktopAuthenticator.git
 cd SteamDesktopAuthenticator
-.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-transfer-win-x64'
+.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-transfer-fixed-win-x64'
 ```
 
 Le script refuse un dossier de sortie existant afin de ne pas ecraser ou inclure
@@ -148,5 +161,5 @@ ulterieure, les correctifs disponibles devront etre verifies de nouveau.
 Pour construire a cote d'une version deja utilisee, fournir un nouveau dossier :
 
 ```powershell
-.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-transfer-win-x64'
+.\build-portable.ps1 -OutputDirectory 'artifacts\SDA-transfer-rebuild-win-x64'
 ```

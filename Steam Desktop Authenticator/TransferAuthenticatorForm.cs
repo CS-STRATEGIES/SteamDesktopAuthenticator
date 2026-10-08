@@ -16,13 +16,17 @@ namespace Steam_Desktop_Authenticator
         private readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(510, 0) };
         private bool busy;
         private bool terminal;
+        private readonly bool recoveryOnly;
 
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string EncryptionPassphrase { get; private set; }
 
-        public TransferAuthenticatorForm()
+        public TransferAuthenticatorForm(bool recoveryOnly = false)
         {
-            Text = "Transfer Authenticator";
+            this.recoveryOnly = recoveryOnly;
+            terminal = recoveryOnly;
+            transfer.Enabled = !recoveryOnly;
+            Text = recoveryOnly ? "Recover saved transfer" : "Transfer Authenticator";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -37,7 +41,11 @@ namespace Steam_Desktop_Authenticator
             panel.Controls.Add(new Label
             {
                 AutoSize = true, MaximumSize = new Size(510, 0),
-                Text = "Keep Steam Guard enabled on your phone. You need its current login code and access to the verified phone number for the SMS.\n\n" +
+                Text = recoveryOnly
+                    ? "SDA cannot read its account index. Do not remove your Steam authenticator or start another transfer.\n\n" +
+                      "Recover an encrypted .sda-transfer backup below, or close SDA and restore your complete maFiles backup. Recovery is offline.\n\n" +
+                      "Existing account files and the unreadable index are preserved. Restore each missing account from its own backup."
+                    : "Keep Steam Guard enabled on your phone. You need its current login code and access to the verified phone number for the SMS.\n\n" +
                     "Submitting the SMS code replaces the phone authenticator with SDA. Steam documents a 2-day trade and market restriction for transfers; Steam determines the actual restriction.\n\n" +
                     "Save the encryption password and the new recovery code. Do not remove the existing authenticator first."
             });
@@ -89,6 +97,7 @@ namespace Steam_Desktop_Authenticator
 
         private async void Transfer_Click(object sender, EventArgs e)
         {
+            if (recoveryOnly) return;
             SetBusy(true);
             TransferBackup backup = null;
             bool finalRequestAttempted = false;
@@ -198,10 +207,11 @@ namespace Steam_Desktop_Authenticator
                 if (backup.Reply == null)
                     throw new InvalidOperationException("This backup contains no Steam response. It cannot restore new secrets. If the SMS was submitted, check the account with Steam before retrying.");
                 var account = AuthenticatorTransfer.ReadAccount(backup.Reply, backup.Session);
-                var manifest = Manifest.GetManifest();
+                var directory = Path.Combine(Manifest.GetExecutableDir(), "maFiles");
+                var manifest = recoveryOnly ? Manifest.LoadForRecovery(directory) : Manifest.GetManifest();
                 var passphrase = RequestPassphrase(manifest);
                 if (passphrase == null) return;
-                TransferBackup.SaveAccount(Path.Combine(Manifest.GetExecutableDir(), "maFiles"), manifest, account, passphrase);
+                TransferBackup.SaveAccount(directory, manifest, account, passphrase);
                 EncryptionPassphrase = passphrase;
                 ShowSuccess(account, backup.FilePath);
             }
@@ -210,6 +220,7 @@ namespace Steam_Desktop_Authenticator
                 MessageBox.Show(this, ex is InvalidOperationException ? ex.Message : "Recovery failed. Check the backup, password and writable disk space. Keep the backup.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             finally { SetBusy(false); }
+            if (recoveryOnly && EncryptionPassphrase != null) Close();
         }
 
         private void ShowSuccess(SteamGuardAccount account, string backupPath)

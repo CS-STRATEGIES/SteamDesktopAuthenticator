@@ -60,19 +60,12 @@ namespace Steam_Desktop_Authenticator
             }
             catch (ManifestParseException)
             {
-                // Manifest file was corrupted, generate a new one.
-                try
-                {
-                    MessageBox.Show("Your settings were unexpectedly corrupted and were reset to defaults.", "Steam Desktop Authenticator", MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
-                    man = Manifest.GenerateNewManifest(true);
-                }
-                catch (MaFileEncryptedException)
-                {
-                    // An maFile was encrypted, we're fucked.
-                    MessageBox.Show("Sorry, but SDA was unable to recover your accounts since you used encryption.\nYou'll need to recover your Steam accounts by removing the authenticator.\nClick OK to view instructions.", "Steam Desktop Authenticator", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    Process.Start(@"https://github.com/Jessecar96/SteamDesktopAuthenticator/wiki/Help!-I'm-locked-out-of-my-account");
-                    return;
-                }
+                // La sauvegarde autonome reste accessible sans index lisible.
+                using var recovery = new TransferAuthenticatorForm(recoveryOnly: true);
+                recovery.ShowDialog();
+                if (recovery.EncryptionPassphrase == null) return;
+                man = Manifest.GetManifest(true);
+                options.EncryptionKey = recovery.EncryptionPassphrase;
             }
 
             // Warning that this software is no longer supported

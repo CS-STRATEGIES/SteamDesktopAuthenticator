@@ -353,3 +353,14 @@ MigrationBackup/
 .ionide/
 
 .idea/
+
+# Outils et livrables locaux
+.build/
+artifacts/
+
+# Secrets Steam, y compris les exports et sauvegardes
+maFiles/
+*.maFile
+*.maFile.*
+*.sda-transfer
+*.sda-transfer.*

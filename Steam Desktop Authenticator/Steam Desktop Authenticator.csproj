@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
+    <PublishTrimmed>false</PublishTrimmed>
     <OutputType>WinExe</OutputType>
     <RootNamespace>Steam_Desktop_Authenticator</RootNamespace>
     <ApplicationRevision>0</ApplicationRevision>
@@ -34,6 +38,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="SteamKit2" Version="3.0.0-Beta.4" />
+    <PackageReference Include="SteamKit2" Version="3.4.0" />
+    <PackageReference Include="protobuf-net" Version="3.4.30" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.12" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 </Project>

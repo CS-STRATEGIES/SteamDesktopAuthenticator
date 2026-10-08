@@ -1,3 +1,7 @@
+Fork CS-STRATEGIES pour une utilisation ponctuelle. La version autonome Windows
+et les dependances actualisees sont decrites dans [USAGE-PONCTUEL.md](USAGE-PONCTUEL.md).
+Les instructions et avertissements du projet original sont conserves ci-dessous.
+
 <h1 align="center">
   <img src="https://raw.githubusercontent.com/Jessecar96/SteamDesktopAuthenticator/master/icon.png" height="64" width="64" />
   <br/>
